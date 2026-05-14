@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إعداد طابعات نقاط البيع</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h5 class="mb-0 fw-bold">إعداد طابعات نقاط البيع</h5>
+      <div class="d-flex gap-2">
+        <button id="btn-settings" class="btn btn-outline-secondary btn-sm" title="الإعدادات">⚙</button>
+        <button id="btn-diagnose" class="btn btn-outline-warning btn-sm" title="تشخيص الاتصال">🔍 تشخيص</button>
+        <button id="btn-refresh" class="btn btn-outline-secondary btn-sm">تحديث</button>
+        <button id="btn-save" class="btn btn-primary btn-sm">حفظ الكل</button>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settings-panel" class="card mb-3" style="display:none">
+      <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+          <div class="col">
+            <label class="form-label small mb-1">رابط السيرفر</label>
+            <input id="input-server-url" type="text" class="form-control form-control-sm" placeholder="مثال: 127.0.0.1:8080 أو lo.erplok.com">
+          </div>
+          <div class="col">
+            <label class="form-label small mb-1">Desktop Token</label>
+            <input id="input-token" type="text" class="form-control form-control-sm" placeholder="pos-desktop-agent-token-2024">
+          </div>
+          <div class="col-auto">
+            <button id="btn-save-config" class="btn btn-success btn-sm">حفظ</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="status-msg" class="small mt-1 mb-2"></div>
+
+    <div id="fallback-msg" class="alert alert-warning" style="display:none">
+      تعذّر جلب المجموعات — تأكد من رابط السيرفر والـ Token في الإعدادات ثم اضغط تحديث
+    </div>
+
+    <!-- Direct Printer Settings -->
+    <div class="card mb-3 border-primary">
+      <div class="card-header bg-primary text-white py-2 fw-bold">
+        الطابعة المباشرة (طباعة بون الكاشير)
+      </div>
+      <div class="card-body py-2">
+        <label class="form-label small mb-1">اختر الطابعة الرئيسية:</label>
+        <select id="select-direct-printer" class="form-select form-select-sm"></select>
+      </div>
+    </div>
+
+    <h6 class="fw-bold mt-4 mb-2 text-secondary">طابعات بونات التحضير (حسب أقسام المنيو)</h6>
+    <table class="table table-bordered table-sm table-hover">
+      <thead class="table-light">
+        <tr>
+          <th>قسم التحضير (Category)</th>
+          <th style="width: 60%">طابعة المطبخ / البار</th>
+        </tr>
+      </thead>
+      <tbody id="categories-body"></tbody>
+    </table>
+  </div>
+
+  <!-- Diagnose Modal -->
+  <div id="diagnose-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:10px; width:520px; max-height:80vh; overflow-y:auto; padding:20px; direction:rtl;">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="fw-bold mb-0">🔍 تشخيص الاتصال</h6>
+        <button id="btn-close-diagnose" class="btn btn-sm btn-outline-secondary">✕</button>
+      </div>
+      <div id="diagnose-server-info" class="alert alert-secondary py-2 small mb-3"></div>
+      <div id="diagnose-results"></div>
+      <div class="mt-3 d-flex gap-2">
+        <button id="btn-run-diagnose" class="btn btn-warning btn-sm">▶ تشغيل الاختبار</button>
+        <button id="btn-open-settings-from-diagnose" class="btn btn-outline-secondary btn-sm">⚙ فتح الإعدادات</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

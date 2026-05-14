@@ -1,0 +1,36 @@
+{
+  "name": "hadi-agent",
+  "version": "1.2.0",
+  "description": "POS Printer Configuration Agent - Windows 7/8/10/11",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --ia32 -c.directories.output=../public/downloads/build-win7-setup-v5",
+    "build:x64": "electron-builder --win --x64 -c.directories.output=../public/downloads/build-win10-setup-v5",
+    "test": "jest"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "22.3.27",
+    "electron-builder": "^24.13.3",
+    "fast-check": "^3.0.0",
+    "jest": "^29.0.0"
+  },
+  "build": {
+    "appId": "com.massar.hadi-agent",
+    "productName": "Hadi Agent",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "assets/**/*"
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

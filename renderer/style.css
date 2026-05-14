@@ -1,0 +1,26 @@
+body {
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  direction: rtl;
+  background: #f8f9fa;
+}
+
+.container {
+  max-width: 700px;
+  margin: 20px auto;
+}
+
+table {
+  background: #fff;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+table th {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+table td {
+  vertical-align: middle;
+  font-size: 0.9rem;
+}
