@@ -13,8 +13,8 @@ let tray = null;
  */
 function createWindow() {
     win = new BrowserWindow({
-        width: 750,
-        height: 550,
+        width: 1500,
+        height: 1000,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -80,7 +80,7 @@ function createTray() {
 
 app.whenReady().then(() => {
     createWindow();
-    startServer(5000); // Start the local HTTP server for print requests
+    startServer(5000, win); // Start the local HTTP server for print requests
 });
 
 // Prevent the app from quitting when all windows are closed
