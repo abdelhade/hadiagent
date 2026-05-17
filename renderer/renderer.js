@@ -6,8 +6,8 @@ let assignments = {};
 async function init() {
   // Load config into settings fields
   const config = await window.electronAPI.invoke('config:load');
-  document.getElementById('input-server-url').value = config.serverUrl || 'http://127.0.0.1:8080';
-  document.getElementById('input-token').value = config.token || 'pos-desktop-agent-token-2024';
+  document.getElementById('input-server-url').value = config.serverUrl || 'https://jac.elhadeerp.com';
+  document.getElementById('input-token').value = config.token || 'pos2026';
 
   assignments = await window.electronAPI.invoke('assignments:load');
   printers = await window.electronAPI.invoke('printers:get');
@@ -136,5 +136,106 @@ document.getElementById('btn-save').addEventListener('click', saveAll);
 window.electronAPI.on('assignments:saved', (data) => {
   showStatus(data.success ? 'تم الحفظ بنجاح ✓' : 'فشل الحفظ ✗', data.success);
 });
+
+// ── Diagnose Tool ──────────────────────────────────────────────
+const diagnoseModal = document.getElementById('diagnose-modal');
+
+document.getElementById('btn-diagnose').addEventListener('click', async () => {
+  diagnoseModal.style.display = 'flex';
+  const config = await window.electronAPI.invoke('config:load');
+  const url = (config.serverUrl || '').trim().replace(/\/$/, '');
+  document.getElementById('diagnose-server-info').textContent =
+    `السيرفر: ${url || '(غير محدد)'}   |   Token: ${config.token ? config.token.substring(0, 8) + '…' : '(فارغ)'}`;
+  document.getElementById('diagnose-results').innerHTML = '<p class="text-muted small">اضغط "تشغيل الاختبار" للبدء…</p>';
+});
+
+document.getElementById('btn-close-diagnose').addEventListener('click', () => {
+  diagnoseModal.style.display = 'none';
+});
+
+document.getElementById('btn-open-settings-from-diagnose').addEventListener('click', () => {
+  diagnoseModal.style.display = 'none';
+  document.getElementById('settings-panel').style.display = 'block';
+});
+
+document.getElementById('btn-run-diagnose').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-run-diagnose');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري الاختبار…';
+
+  const config = await window.electronAPI.invoke('config:load');
+  const results = await window.electronAPI.invoke('diagnose:run', config);
+
+  renderDiagnoseResults(results);
+  btn.disabled = false;
+  btn.textContent = '▶ تشغيل الاختبار';
+});
+
+function renderDiagnoseResults(results) {
+  const container = document.getElementById('diagnose-results');
+  container.innerHTML = '';
+
+  results.forEach(r => {
+    const div = document.createElement('div');
+    div.className = `d-flex align-items-start gap-2 mb-2 p-2 rounded border ${r.ok ? 'border-success bg-success bg-opacity-10' : 'border-danger bg-danger bg-opacity-10'}`;
+
+    const icon = document.createElement('span');
+    icon.style.fontSize = '1.1rem';
+    icon.textContent = r.ok ? '✅' : '❌';
+
+    const body = document.createElement('div');
+    body.className = 'small';
+    body.innerHTML = `<strong>${r.label}</strong><br><span class="${r.ok ? 'text-success' : 'text-danger'}">${r.detail}</span>`;
+    if (r.hint) {
+      const hint = document.createElement('div');
+      hint.className = 'text-muted mt-1';
+      hint.textContent = '💡 ' + r.hint;
+      body.appendChild(hint);
+    }
+
+    div.appendChild(icon);
+    div.appendChild(body);
+    container.appendChild(div);
+  });
+}
+
+// ── Request Logs ──────────────────────────────────────────────
+const logsContainer = document.getElementById('logs-container');
+let logs = [];
+
+window.electronAPI.on('server:request', (data) => {
+  if (logs.length === 0) { logsContainer.innerHTML = ''; }
+  
+  logs.unshift(data);
+  if (logs.length > 50) { logs.pop(); }
+  
+  renderLogs();
+});
+
+document.getElementById('btn-clear-logs').addEventListener('click', () => {
+  logs = [];
+  logsContainer.innerHTML = '<div class="text-muted text-center py-5">لا توجد طلبات حتى الآن…</div>';
+});
+
+function renderLogs() {
+  logsContainer.innerHTML = '';
+  logs.forEach(log => {
+    const div = document.createElement('div');
+    div.className = `mb-1 p-1 border-bottom ${log.success ? 'text-success' : 'text-danger'}`;
+    const statusIcon = log.success ? '✅' : '❌';
+    
+    let detail = '';
+    if (log.type === 'كاشير') {
+      detail = `[${log.type}] ${log.printer || 'طابعة غير محددة'}`;
+    } else {
+      detail = `[${log.type}] قسم ${log.categoryId || '?'} -> ${log.printer || 'طابعة غير محددة'}`;
+    }
+    
+    if (log.error) { detail += ` | خطأ: ${log.error}`; }
+
+    div.innerHTML = `<span class="text-muted">[${log.timestamp}]</span> ${statusIcon} ${detail}`;
+    logsContainer.appendChild(div);
+  });
+}
 
 init();

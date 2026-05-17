@@ -6,8 +6,18 @@ const { loadAssignments } = require('./assignment-store');
 
 let server = null;
 
-function startServer(port = 5000) {
+function startServer(port = 5000, mainWindow = null) {
     if (server) return;
+
+    function notifyUI(type, details) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('server:request', {
+                timestamp: new Date().toLocaleTimeString('ar-EG'),
+                type,
+                ...details
+            });
+        }
+    }
 
     server = http.createServer(async (req, res) => {
         // CORS Headers
@@ -37,6 +47,7 @@ function startServer(port = 5000) {
                     const directPrinter = assignments['_direct_printer'];
 
                     if (!directPrinter) {
+                        notifyUI('كاشير', { success: false, error: 'الطابعة غير محددة' });
                         res.writeHead(400, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ success: false, error: 'لم يتم إعداد الطابعة المباشرة' }));
                         return;
@@ -46,9 +57,11 @@ function startServer(port = 5000) {
                     const printSuccess = await printContent(data.content || '', directPrinter);
                     
                     if (printSuccess) {
+                        notifyUI('كاشير', { success: true, printer: directPrinter });
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ success: true, message: 'تم إرسال الطباعة بنجاح', printer: directPrinter }));
                     } else {
+                        notifyUI('كاشير', { success: false, error: 'فشل الطباعة في ويندوز', printer: directPrinter });
                         res.writeHead(500, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ success: false, error: 'فشلت عملية الطباعة في الويندوز' }));
                     }
@@ -71,6 +84,7 @@ function startServer(port = 5000) {
                     const kitchenPrinter = categoryId ? assignments[String(categoryId)] : null;
 
                     if (!kitchenPrinter) {
+                        notifyUI('مطبخ', { success: false, error: 'طابعة القسم غير محددة', categoryId });
                         res.writeHead(400, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ success: false, error: 'لم يتم إعداد طابعة لهذا القسم' }));
                         return;
@@ -80,9 +94,11 @@ function startServer(port = 5000) {
                     const printSuccess = await printContent(data.content || '', kitchenPrinter);
 
                     if (printSuccess) {
+                        notifyUI('مطبخ', { success: true, printer: kitchenPrinter, categoryId });
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ success: true, message: 'تم إرسال طباعة التحضير بنجاح', printer: kitchenPrinter }));
                     } else {
+                        notifyUI('مطبخ', { success: false, error: 'فشلت عملية طباعة التحضير', printer: kitchenPrinter, categoryId });
                         res.writeHead(500, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ success: false, error: 'فشلت عملية طباعة التحضير' }));
                     }
@@ -103,14 +119,6 @@ function startServer(port = 5000) {
     });
 }
 
-function stopServer() {
-    if (server) {
-        server.close();
-        server = null;
-    }
-}
-
-module.exports = { startServer, stopServer };
 function stopServer() {
     if (server) {
         server.close();
