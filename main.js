@@ -5,6 +5,9 @@ const path = require('path');
 const { registerIpcHandlers } = require('./src/ipc-handlers');
 const { startServer }         = require('./src/local-server');
 const { startPoller }         = require('./src/queue-poller');
+const { startPolling, registerPrintWorkerIpc } = require('./src/print-worker');
+const { WindowsPrinterAdapter }               = require('./src/printer-adapter');
+const repo                                    = require('./src/posdb-repository');
 
 // ── config loader (بدون Electron dependency) ─────────────────────────────────
 const fs   = require('fs/promises');
@@ -102,6 +105,9 @@ app.whenReady().then(async () => {
         startPoller(config, win);
     }
 
+    // Print Worker — طباعة التحضير من POSDB المحلية
+    await initPrintWorker(win);
+
     // إعادة تشغيل الـ poller عند حفظ الـ config من الـ UI
     const { ipcMain } = require('electron');
     ipcMain.on('config:updated', async () => {
@@ -113,6 +119,31 @@ app.whenReady().then(async () => {
         }
     });
 });
+
+/**
+ * تهيئة print worker للطباعة المحلية من POSDB
+ */
+async function initPrintWorker(mainWindow) {
+    const { session } = require('electron');
+    const ses         = session.defaultSession;
+    const adapter     = new WindowsPrinterAdapter();
+    const config      = await loadConfig();
+    const staleMs     = config.staleThresholdMs ?? 300000;
+
+    // استرجاع transactions العالقة
+    const recovered = await repo.recoverStuckTransactions(ses, staleMs);
+    if (recovered > 0) {
+        console.log(`[main] recovered ${recovered} stuck transactions`);
+    }
+
+    // تسجيل IPC handlers
+    registerPrintWorkerIpc(mainWindow, ses, adapter);
+
+    // تشغيل polling فقط إذا كان الـ flag مفعّلاً
+    if (config.enableLocalPrinting === true) {
+        startPolling(mainWindow, ses, adapter);
+    }
+}
 
 // Prevent the app from quitting when all windows are closed
 app.on('window-all-closed', (e) => {

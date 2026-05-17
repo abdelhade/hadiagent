@@ -11,7 +11,7 @@
 async function readCategoriesFromIndexedDB(sessionObj) {
     const script = `
 new Promise((resolve) => {
-  const req = indexedDB.open('pos-db');
+  const req = indexedDB.open('POSDB');
   req.onerror = () => resolve([]);
   req.onsuccess = (e) => {
     const db = e.target.result;

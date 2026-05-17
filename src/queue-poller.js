@@ -5,6 +5,10 @@ const https = require('https');
 const { loadAssignments } = require('./assignment-store');
 const { printContent }    = require('./printer-service');
 
+// ── category → printer_name cache (مُحدَّث من الـ API) ──────────────────────
+let categoryPrinterMap = {}; // { "5": "Kitchen Printer 1", ... }
+let categoryMapLoaded  = false;
+
 const POLL_INTERVAL_MS = 3000;
 const MAX_ATTEMPTS     = 3;
 
@@ -80,6 +84,31 @@ function httpRequest(method, url, token, body = null) {
 
 // ── core polling logic ────────────────────────────────────────────────────────
 
+/**
+ * جلب الـ categories مع printer_name من الـ API وتخزينها في الـ cache المحلي.
+ * يُستدعى مرة عند البدء ثم كل 5 دقائق.
+ */
+async function refreshCategoryPrinterMap(serverUrl, token) {
+    const url = `${serverUrl}/pos/api/desktop/categories?token=${encodeURIComponent(token)}`;
+    const result = await httpRequest('GET', url, token);
+
+    if (!result.json || !Array.isArray(result.json.categories)) {
+        console.warn('[QueuePoller] فشل جلب الأقسام من الـ API — سيتم استخدام assignments.json');
+        return;
+    }
+
+    const map = {};
+    for (const cat of result.json.categories) {
+        if (cat.printer_name) {
+            map[String(cat.id)] = cat.printer_name;
+        }
+    }
+
+    categoryPrinterMap = map;
+    categoryMapLoaded  = true;
+    console.log(`[QueuePoller] تم تحديث خريطة الأقسام: ${Object.keys(map).length} قسم مربوط بطابعة`);
+}
+
 async function pollOnce(serverUrl, token) {
     const pendingUrl = `${serverUrl}/pos/api/queue/pending`;
     const result     = await httpRequest('GET', pendingUrl, token);
@@ -103,9 +132,23 @@ async function pollOnce(serverUrl, token) {
             let printerName = null;
 
             if (job.print_type === 'direct') {
+                // الطباعة المباشرة: من assignments.json فقط
                 printerName = assignments['_direct_printer'] || null;
             } else if (job.print_type === 'kitchen') {
-                printerName = job.category_id ? (assignments[String(job.category_id)] || null) : null;
+                const catKey = String(job.category_id || '');
+
+                // أولاً: من خريطة الـ API (printer_name من قاعدة البيانات)
+                if (catKey && categoryPrinterMap[catKey]) {
+                    printerName = categoryPrinterMap[catKey];
+                }
+                // ثانياً: fallback لـ assignments.json اليدوي
+                else if (catKey && assignments[catKey]) {
+                    printerName = assignments[catKey];
+                }
+                // ثالثاً: الطابعة الافتراضية
+                else {
+                    printerName = assignments['__default__'] || null;
+                }
             }
 
             if (!printerName) {
@@ -182,6 +225,11 @@ function startPoller(config, mainWindow) {
             isPolling = false;
         }
     }
+
+    // جلب خريطة الأقسام فوراً عند البدء
+    refreshCategoryPrinterMap(serverUrl, token).catch(() => {});
+    // تحديث الخريطة كل 5 دقائق
+    setInterval(() => refreshCategoryPrinterMap(serverUrl, token).catch(() => {}), 5 * 60 * 1000);
 
     // أول poll فوري بعد ثانية
     setTimeout(tick, 1000);

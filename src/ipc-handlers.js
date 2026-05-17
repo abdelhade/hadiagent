@@ -81,11 +81,48 @@ async function fetchCategoriesFromApi() {
 }
 
 function registerIpcHandlers(mainWindow) {
+    /**
+     * جلب categories:
+     * 1. من POSDB (IndexedDB المحلية) — لو فيها بيانات
+     * 2. من API السيرفر — لو POSDB فاضية
+     * 3. من categories-cache.json — لو السيرفر مش متاح
+     */
     ipcMain.handle('categories:get', async () => {
+        const { app } = require('electron');
+        const cachePath = path.join(app.getPath('userData'), 'categories-cache.json');
+
+        // 1. حاول من POSDB أولاً
         try {
-            return await fetchCategoriesFromApi();
-        } catch (err) {
-            console.error('[categories:get] error:', err.message);
+            const { readCategoriesFromIndexedDB } = require('./indexeddb-reader');
+            const fromDb = await readCategoriesFromIndexedDB(null);
+            if (Array.isArray(fromDb) && fromDb.length > 0) {
+                console.log('[categories:get] loaded from POSDB:', fromDb.length);
+                return fromDb;
+            }
+        } catch (_err) {
+            console.warn('[categories:get] POSDB unavailable, falling back to API');
+        }
+
+        // 2. POSDB فاضية — جيب من السيرفر
+        try {
+            const fromApi = await fetchCategoriesFromApi();
+            if (Array.isArray(fromApi) && fromApi.length > 0) {
+                await fs.mkdir(path.dirname(cachePath), { recursive: true });
+                await fs.writeFile(cachePath, JSON.stringify(fromApi), 'utf8');
+                console.log('[categories:get] fetched from API and cached:', fromApi.length);
+                return fromApi;
+            }
+        } catch (_err) {
+            console.warn('[categories:get] API fetch failed, trying cache');
+        }
+
+        // 3. السيرفر فشل — ارجع من الـ cache
+        try {
+            const raw    = await fs.readFile(cachePath, 'utf8');
+            const cached = JSON.parse(raw);
+            console.log('[categories:get] loaded from cache:', cached.length);
+            return Array.isArray(cached) ? cached : [];
+        } catch (_err) {
             return [];
         }
     });

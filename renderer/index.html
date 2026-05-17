@@ -68,8 +68,29 @@
     <tbody id="categories-body"></tbody>
     </table>
 
+    <!-- Print Worker Status -->
+    <div class="card mb-3 border-0 shadow-sm mt-3">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <span class="fw-semibold small">طباعة التحضير التلقائية (POSDB)</span>
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="hw-enable-toggle" role="switch">
+            <label class="form-check-label small" for="hw-enable-toggle">تفعيل</label>
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-3 mb-2">
+          <span class="small">الحالة: <strong id="hw-polling-status">—</strong></span>
+          <span class="small">مطبوع: <strong id="hw-printed-count">0</strong></span>
+          <button id="hw-btn-toggle" class="btn btn-outline-secondary btn-sm ms-auto">إيقاف/تشغيل</button>
+        </div>
+        <div id="hw-errors-card" style="display:none">
+          <ul class="list-group list-group-flush" id="hw-errors-ul"></ul>
+        </div>
+      </div>
+    </div>
+
     <!-- Request Logs -->
-    <div class="mt-4">
+    <div class="mt-2">
       <h6 class="fw-bold mb-2 text-secondary d-flex justify-content-between align-items-center">
         <span>سجل الطلبات الأخيرة (آخر 50 طلب)</span>
         <button id="btn-clear-logs" class="btn btn-link btn-sm text-decoration-none p-0">مسح السجل</button>

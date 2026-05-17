@@ -239,3 +239,61 @@ function renderLogs() {
 }
 
 init();
+
+// ── Print Worker Status (read-only observer) ──────────────────────────────
+(function () {
+  'use strict';
+
+  var pollingStatusEl = document.getElementById('hw-polling-status');
+  var printedCountEl  = document.getElementById('hw-printed-count');
+  var errorsCardEl    = document.getElementById('hw-errors-card');
+  var errorsUlEl      = document.getElementById('hw-errors-ul');
+  var enableToggleEl  = document.getElementById('hw-enable-toggle');
+  var toggleBtnEl     = document.getElementById('hw-btn-toggle');
+
+  function hwUpdateStatus() {
+    window.electronAPI.invoke('print-worker:status').then(function (s) {
+      if (!s) return;
+      pollingStatusEl.textContent = s.polling ? '🟢 نشط' : '🔴 متوقف';
+      printedCountEl.textContent  = s.printed_count || 0;
+      var errors = s.recent_errors || [];
+      if (errors.length > 0) {
+        errorsUlEl.innerHTML = errors.map(function (e) {
+          return '<li class="list-group-item list-group-item-danger small py-1">'
+            + (e.timestamp || '').slice(11, 19) + ' | ' + (e.message || '') + '</li>';
+        }).join('');
+        errorsCardEl.style.display = 'block';
+      } else {
+        errorsCardEl.style.display = 'none';
+      }
+    }).catch(function () {});
+  }
+
+  if (toggleBtnEl) {
+    toggleBtnEl.addEventListener('click', function () {
+      window.electronAPI.invoke('print-worker:status').then(function (s) {
+        return window.electronAPI.invoke((s && s.polling) ? 'print-worker:stop' : 'print-worker:start');
+      }).then(hwUpdateStatus).catch(function () {});
+    });
+  }
+
+  if (enableToggleEl) {
+    window.electronAPI.invoke('config:load').then(function (cfg) {
+      enableToggleEl.checked = !!(cfg && cfg.enableLocalPrinting);
+    }).catch(function () {});
+
+    enableToggleEl.addEventListener('change', function () {
+      window.electronAPI.invoke('config:load').then(function (cfg) {
+        return window.electronAPI.invoke('config:save',
+          Object.assign({}, cfg, { enableLocalPrinting: enableToggleEl.checked })
+        );
+      }).then(function () {
+        return window.electronAPI.invoke(enableToggleEl.checked ? 'print-worker:start' : 'print-worker:stop');
+      }).then(hwUpdateStatus).catch(function () {});
+    });
+  }
+
+  window.electronAPI.on('print-worker:job-done', hwUpdateStatus);
+  hwUpdateStatus();
+  setInterval(hwUpdateStatus, 5000);
+}());
