@@ -20,6 +20,8 @@ const { normalizeMassarUrl } = require('./src/url-utils');
 let win = null;
 let tray = null;
 let posWin = null;
+let isQuitting = false;
+let trayHintShown = false;
 let cachedConfig = { serverUrl: '', enableLocalPrinting: true, agentToken: '' };
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -82,10 +84,35 @@ async function createPosWindow(serverUrl) {
     });
 }
 
+function hideToTray() {
+    if (!win || win.isDestroyed()) {
+        return;
+    }
+    win.hide();
+    if (tray && !trayHintShown) {
+        trayHintShown = true;
+        tray.setToolTip('Hadi Agent — يعمل في الخلفية (انقر مرتين للفتح)');
+        try {
+            const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+            const icon = nativeImage.createFromPath(iconPath);
+            if (!icon.isEmpty()) {
+                tray.displayBalloon({
+                    icon,
+                    title: 'Hadi Agent',
+                    content: 'يعمل في الخلفية — الطباعة مستمرة. انقر مرتين على الأيقونة للفتح.',
+                });
+            }
+        } catch (_err) {
+            // displayBalloon غير متاح على بعض إصدارات Windows
+        }
+    }
+}
+
 function createWindow() {
     win = new BrowserWindow({
         width: 900,
         height: 700,
+        show: true,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -97,8 +124,10 @@ function createWindow() {
     win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
     win.on('close', (e) => {
-        e.preventDefault();
-        win.hide();
+        if (!isQuitting) {
+            e.preventDefault();
+            hideToTray();
+        }
     });
 
     registerIpcHandlers(win);
@@ -115,16 +144,26 @@ function createTray() {
     tray.setContextMenu(
         Menu.buildFromTemplate([
             {
-                label: 'فتح',
+                label: 'إظهار النافذة',
                 click: () => {
-                    if (win) {
+                    if (win && !win.isDestroyed()) {
                         win.show();
                         win.focus();
                     }
                 },
             },
+            {
+                label: 'إخفاء للخلفية',
+                click: () => hideToTray(),
+            },
             { type: 'separator' },
-            { label: 'إغلاق', click: () => app.exit(0) },
+            {
+                label: 'إنهاء البرنامج',
+                click: () => {
+                    isQuitting = true;
+                    app.quit();
+                },
+            },
         ])
     );
 
@@ -223,9 +262,18 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+    isQuitting = true;
     stopServer();
 });
 
 app.on('window-all-closed', (e) => {
     e.preventDefault();
+});
+
+// لا يُغلق التطبيق عند إغلاق كل النوافذ — يبقى في الـ Tray
+app.on('activate', () => {
+    if (win && !win.isDestroyed()) {
+        win.show();
+        win.focus();
+    }
 });
