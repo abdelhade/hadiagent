@@ -4,7 +4,8 @@
   "description": "POS Printer Configuration Agent - Windows 7/8/10/11",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/kill-port-5000.js && electron .",
+    "kill-port": "node scripts/kill-port-5000.js",
     "build": "electron-builder --win --ia32 -c.directories.output=../public/downloads/build-win7-setup-v5",
     "build:x64": "electron-builder --win --x64 -c.directories.output=../public/downloads/build-win10-setup-v5",
     "test": "jest"

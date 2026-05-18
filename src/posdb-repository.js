@@ -46,6 +46,23 @@ function _open(store, mode, body) {
  * @param {Electron.Session|null} session
  * @returns {Promise<Array<{id: number, name: string, printer_name: string|null}>>}
  */
+/**
+ * @param {Electron.Session|null} session
+ * @returns {Promise<object|null>}
+ */
+async function getPrintConfig(session) {
+    const script = _open('print_config', 'readonly', `
+    const r = store_.get('main');
+    r.onsuccess = () => { db.close(); resolve(r.result || null); };
+    r.onerror   = () => { db.close(); resolve(null); };`);
+    try {
+        const result = await _exec(session, script);
+        return result && typeof result === 'object' ? result : null;
+    } catch (_) {
+        return null;
+    }
+}
+
 async function getCategories(session) {
     const script = _open('categories', 'readonly', `
     const r = store_.getAll();
@@ -190,6 +207,7 @@ async function recoverStuckTransactions(session, staleThresholdMs = 300000) {
 
 module.exports = {
     getCategories,
+    getPrintConfig,
     getPendingTransactions,
     lockTransaction,
     markTransactionPrinted,

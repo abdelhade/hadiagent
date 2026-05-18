@@ -1,53 +1,70 @@
-# POS Printer Config — Desktop Agent
+# Hadi Agent — طباعة POS (Massar)
 
-برنامج Electron يعمل في الخلفية على جهاز الكاشير، يتيح تعيين طابعة مخصصة لكل مجموعة أصناف.
+تطبيق **Electron** يعمل على جهاز الكاشير: يستقبل أوامر الطباعة من متصفح Massar ويطبع صامتاً على طابعات Windows (مطبخ حسب المجموعة + كاشير).
+
+## التوثيق الكامل
+
+**[docs/POS-PRINTING.md](docs/POS-PRINTING.md)** — اقرأه قبل أي تطوير:
+
+- معمارية النظام وتدفق البيانات
+- POSDB + `print_jobs`
+- واجهات HTTP و Laravel API
+- الإعداد (`.env`, Token, أسماء الطابعات)
+- استكشاف الأخطاء
 
 ## المتطلبات
 
 - Node.js 18+
 - Windows 10/11
+- Massar يعمل محلياً (مثال: `http://127.0.0.1:8080`)
 
-## التثبيت والتشغيل
+## التشغيل السريع
 
 ```bash
-cd Modules/POS/print-agent
+cd hadi-agent
 npm install
 npm start
 ```
 
-## بناء المثبّت (.exe)
+- يحرر المنافذ `5000–5010` ثم يشغّل Agent.
+- افتح Massar: `/pos/restaurant` على نفس الجهاز.
+- في Agent: ⚙ → رابط Massar + Token (من `HADI_AGENT_TOKEN` في `.env`).
 
-1. استبدل `assets/tray-icon.png` و `assets/tray-icon.ico` بأيقونة حقيقية (16×16 PNG / ICO)
-2. شغّل:
+## أوامر npm
+
+| الأمر | الوصف |
+|-------|--------|
+| `npm start` | kill-port + تشغيل Agent |
+| `npm run kill-port` | إيقاف عمليات على 5000–5010 |
+| `npm run build` | بناء مثبّت Windows |
+
+## هيكل المشروع (مختصر)
+
+```
+hadi-agent/
+├── main.js                 # Electron + single instance
+├── src/
+│   ├── local-server.js     # HTTP sync/notify
+│   ├── posdb-sync.js       # كاش من المتصفح
+│   ├── print-worker.js     # print_jobs + kitchen/cashier
+│   └── printer-adapter.js  # Electron silent print
+├── renderer/               # واجهة تشخيص وإعدادات
+└── docs/POS-PRINTING.md    # التوثيق التفصيلي
+```
+
+## متغيرات Massar (`.env`)
+
+```env
+HADI_AGENT_URL=http://127.0.0.1:5000
+HADI_AGENT_TOKEN=your-secret
+HADI_AGENT_PORT_MIN=5000
+HADI_AGENT_PORT_MAX=5010
+```
+
+## بناء المثبّت
 
 ```bash
 npm run build
 ```
 
-3. ستجد الملف الناتج في `build/pos-printer-config Setup 1.0.0.exe`
-4. انسخ الملف إلى `Modules/POS/public/downloads/pos-printer-config-setup.exe`
-
-## متغيرات البيئة
-
-| المتغير | الوصف | الافتراضي |
-|---------|-------|-----------|
-| `POS_API_URL` | رابط API المجموعات | `http://localhost/pos/api/categories` |
-
-## هيكل الملفات
-
-```
-print-agent/
-  main.js          # العملية الرئيسية (Electron main)
-  preload.js       # جسر IPC
-  src/
-    ipc-handlers.js      # معالجات IPC
-    indexeddb-reader.js  # قراءة المجموعات من IndexedDB
-    printer-service.js   # جلب الطابعات من Windows
-    assignment-store.js  # حفظ/تحميل إعدادات الطابعات
-  renderer/
-    index.html     # واجهة المستخدم
-    renderer.js    # منطق الواجهة
-    style.css      # تنسيق RTL
-  assets/
-    tray-icon.png  # أيقونة شريط المهام
-```
+انسخ الـ `.exe` إلى `public/modules/pos/downloads/` حسب إعدادات Massar.

@@ -47,62 +47,27 @@ async function getInstalledPrinters() {
 }
 
 /**
- * Prints content to a specific printer using Electron's hidden window.
- * 
- * @param {string} content The text content to print.
- * @param {string} printerName The name of the printer to use.
- * @returns {Promise<boolean>} Success status.
+ * @param {string} content
+ * @param {string} printerName
+ * @returns {Promise<boolean>}
  */
 async function printContent(content, printerName) {
-    const { BrowserWindow } = require('electron');
-    
-    return new Promise((resolve) => {
-        let printWin = new BrowserWindow({
-            show: false,
-            webPreferences: {
-                nodeIntegration: false
-            }
-        });
+    const { WindowsPrinterAdapter } = require('./printer-adapter');
+    const adapter = new WindowsPrinterAdapter();
+    const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<style>body{font-family:'Courier New',monospace;white-space:pre-wrap;font-size:14px;margin:0;padding:8px;width:78mm}</style>
+</head><body>${String(content)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')}</body></html>`;
 
-        // Convert plain text to HTML with pre tag for preserving formatting
-        const htmlContent = `
-            <!DOCTYPE html>
-            <html lang="ar" dir="rtl">
-            <head>
-                <meta charset="utf-8">
-                <style>
-                    body { 
-                        font-family: 'Courier New', Courier, monospace; 
-                        white-space: pre-wrap; 
-                        font-size: 14px; 
-                        margin: 0; 
-                        padding: 0; 
-                        width: 100%;
-                    }
-                </style>
-            </head>
-            <body>${content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</body>
-            </html>
-        `;
-
-        printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-
-        printWin.webContents.on('did-finish-load', () => {
-            printWin.webContents.print({
-                silent: true,
-                deviceName: printerName,
-                printBackground: true
-            }, (success, errorType) => {
-                printWin.close();
-                if (!success) {
-                    console.error(`[Printer Service] Print failed: ${errorType}`);
-                    resolve(false);
-                } else {
-                    resolve(true);
-                }
-            });
-        });
-    });
+    try {
+        await adapter.print(html, printerName);
+        return true;
+    } catch (err) {
+        console.error('[Printer Service] Print failed:', err.message);
+        return false;
+    }
 }
 
 module.exports = { getInstalledPrinters, printContent };

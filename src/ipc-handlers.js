@@ -1,263 +1,234 @@
 'use strict';
 
-const { ipcMain } = require('electron');
-const http = require('http');
-const https = require('https');
+const { ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
-
 const { getInstalledPrinters } = require('./printer-service');
-const { loadAssignments, saveAssignments } = require('./assignment-store');
+const repo = require('./posdb-repository');
+const sync = require('./posdb-sync');
+const { pullFromMassar } = require('./pos-pull-sync');
+const { normalizeMassarUrl } = require('./url-utils');
+const { getAgentLocalUrl } = require('./local-server');
+const { getServerStatus } = require('./local-server');
 
-// Config file path (stored next to assignments.json)
 let configFilePath = null;
 
 function getConfigPath() {
-    if (configFilePath) return configFilePath;
+    if (configFilePath) {
+        return configFilePath;
+    }
     const { app } = require('electron');
     return path.join(app.getPath('userData'), 'config.json');
 }
 
-function setConfigPath(p) { configFilePath = p; }
+function setConfigPath(p) {
+    configFilePath = p;
+}
 
 async function loadConfig() {
     try {
         const raw = await fs.readFile(getConfigPath(), 'utf8');
-        return JSON.parse(raw);
+        const config = JSON.parse(raw);
+        if (config.serverUrl) {
+            config.serverUrl = normalizeMassarUrl(config.serverUrl);
+        }
+        return config;
     } catch (_err) {
-        return { serverUrl: 'https://jac.elhadeerp.com', token: 'pos2026' };
+        return { serverUrl: '', enableLocalPrinting: true, agentToken: '' };
     }
 }
 
 async function saveConfig(config) {
+    const normalized = { ...config };
+    if (normalized.serverUrl) {
+        normalized.serverUrl = normalizeMassarUrl(normalized.serverUrl);
+    }
     const dir = path.dirname(getConfigPath());
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(getConfigPath(), JSON.stringify(config), 'utf8');
+    await fs.writeFile(getConfigPath(), JSON.stringify(normalized, null, 2), 'utf8');
 }
 
-/**
- * Fetch categories from the Laravel Desktop API endpoint.
- */
-function normalizeUrl(url) {
-    let u = (url || '').trim().replace(/\/$/, '');
-    if (u && !u.startsWith('http://') && !u.startsWith('https://')) {
-        u = 'http://' + u;
-    }
-    return u || '';
-}
-
-async function fetchCategoriesFromApi() {
-    const config = await loadConfig();
-    const baseUrl = normalizeUrl(config.serverUrl);
-    const token = config.token || '';
-    const apiUrl = `${baseUrl}/pos/api/desktop/categories?token=${encodeURIComponent(token)}`;
-
-    console.log('[desktop-api] fetching:', apiUrl, '| token:', token ? '✓' : '✗ EMPTY');
-
-    return new Promise((resolve) => {
-        const transport = apiUrl.startsWith('https') ? https : http;
-        const options = {
-            headers: { 'Accept': 'application/json' },
-            rejectUnauthorized: false,
-            timeout: 10000,
-        };
-
-        transport.get(apiUrl, options, (res) => {
-            let data = '';
-            console.log('[desktop-api] status:', res.statusCode);
-            res.on('data', (chunk) => { data += chunk; });
-            res.on('end', () => {
-                console.log('[desktop-api] response:', data.substring(0, 200));
-                try {
-                    const parsed = JSON.parse(data);
-                    resolve(Array.isArray(parsed.categories) ? parsed.categories : []);
-                } catch (_err) { resolve([]); }
-            });
-        }).on('error', (err) => {
-            console.error('[desktop-api] network error:', err.message);
-            resolve([]);
-        });
-    });
+function getPosSession() {
+    return session.fromPartition('persist:pos');
 }
 
 function registerIpcHandlers(mainWindow) {
-    /**
-     * جلب categories:
-     * 1. من POSDB (IndexedDB المحلية) — لو فيها بيانات
-     * 2. من API السيرفر — لو POSDB فاضية
-     * 3. من categories-cache.json — لو السيرفر مش متاح
-     */
-    ipcMain.handle('categories:get', async () => {
-        const { app } = require('electron');
-        const cachePath = path.join(app.getPath('userData'), 'categories-cache.json');
-
-        // 1. حاول من POSDB أولاً
-        try {
-            const { readCategoriesFromIndexedDB } = require('./indexeddb-reader');
-            const fromDb = await readCategoriesFromIndexedDB(null);
-            if (Array.isArray(fromDb) && fromDb.length > 0) {
-                console.log('[categories:get] loaded from POSDB:', fromDb.length);
-                return fromDb;
-            }
-        } catch (_err) {
-            console.warn('[categories:get] POSDB unavailable, falling back to API');
-        }
-
-        // 2. POSDB فاضية — جيب من السيرفر
-        try {
-            const fromApi = await fetchCategoriesFromApi();
-            if (Array.isArray(fromApi) && fromApi.length > 0) {
-                await fs.mkdir(path.dirname(cachePath), { recursive: true });
-                await fs.writeFile(cachePath, JSON.stringify(fromApi), 'utf8');
-                console.log('[categories:get] fetched from API and cached:', fromApi.length);
-                return fromApi;
-            }
-        } catch (_err) {
-            console.warn('[categories:get] API fetch failed, trying cache');
-        }
-
-        // 3. السيرفر فشل — ارجع من الـ cache
-        try {
-            const raw    = await fs.readFile(cachePath, 'utf8');
-            const cached = JSON.parse(raw);
-            console.log('[categories:get] loaded from cache:', cached.length);
-            return Array.isArray(cached) ? cached : [];
-        } catch (_err) {
-            return [];
-        }
-    });
-
-    ipcMain.handle('printers:get', async () => {
-        try { return await getInstalledPrinters(); } catch (_err) { return []; }
-    });
-
-    ipcMain.handle('assignments:load', async () => {
-        try { return await loadAssignments(); } catch (_err) { return {}; }
-    });
-
-    ipcMain.handle('assignments:save', async (_event, assignments) => {
-        try {
-            await saveAssignments(assignments);
-            if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('assignments:saved', { success: true });
-            }
-            return { success: true };
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : String(err);
-            if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('assignments:saved', { success: false, error: errorMessage });
-            }
-            return { success: false, error: errorMessage };
-        }
-    });
-
     ipcMain.handle('config:load', async () => {
-        try { return await loadConfig(); } catch (_err) { return {}; }
+        try {
+            return await loadConfig();
+        } catch (_err) {
+            return {};
+        }
     });
 
     ipcMain.handle('config:save', async (_event, config) => {
         try {
             await saveConfig(config);
-            // إشعار main.js بتحديث الـ config لإعادة تشغيل الـ poller
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('config:saved', { success: true });
             }
-            require('electron').ipcMain.emit('config:updated');
+            ipcMain.emit('config:updated');
             return { success: true };
         } catch (err) {
             return { success: false, error: err.message };
         }
     });
 
-    ipcMain.handle('diagnose:run', async (_event, config) => {
-        const results = [];
-        const http = require('http');
-        const https = require('https');
-
-        let baseUrl = (config.serverUrl || '').trim().replace(/\/$/, '');
-        if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-            baseUrl = 'http://' + baseUrl;
-        }
-        const token = config.token || '';
-
-        // ── Step 1: URL configured? ──
-        if (!baseUrl) {
-            results.push({ ok: false, label: 'رابط السيرفر', detail: 'لم يتم إدخال رابط السيرفر', hint: 'افتح الإعدادات وأدخل رابط السيرفر الخاص بك' });
-            return results;
-        }
-        results.push({ ok: true, label: 'رابط السيرفر', detail: baseUrl });
-
-        // ── Step 2: Token configured? ──
-        if (!token) {
-            results.push({ ok: false, label: 'Desktop Token', detail: 'الـ Token فارغ', hint: 'أدخل الـ Token الصحيح في الإعدادات' });
-        } else {
-            results.push({ ok: true, label: 'Desktop Token', detail: token.substring(0, 8) + '…' });
-        }
-
-        // ── Step 3: Reachability + Auth (categories endpoint) ──
-        const catUrl = `${baseUrl}/pos/api/desktop/categories?token=${encodeURIComponent(token)}`;
-        const catResult = await httpGet(catUrl, token, http, https);
-        if (!catResult.reachable) {
-            results.push({ ok: false, label: 'الاتصال بالسيرفر', detail: `تعذّر الوصول — ${catResult.error}`, hint: 'تأكد أن السيرفر شغال وأن الـ URL صحيح والـ port مفتوح' });
-            return results;
-        }
-        results.push({ ok: true, label: 'الاتصال بالسيرفر', detail: `HTTP ${catResult.status} — السيرفر يستجيب` });
-
-        if (catResult.status === 401 || catResult.status === 403) {
-            results.push({ ok: false, label: 'التحقق من الـ Token', detail: `HTTP ${catResult.status} — الـ Token غير صحيح أو منتهي`, hint: 'تأكد من الـ Token في إعدادات السيرفر وأعد إدخاله هنا' });
-            return results;
-        }
-        if (catResult.status === 404) {
-            results.push({ ok: false, label: 'مسار الـ API', detail: `HTTP 404 — المسار غير موجود على السيرفر`, hint: 'تأكد أن إصدار السيرفر يدعم /pos/api/desktop/categories' });
-            return results;
-        }
-        if (catResult.status !== 200) {
-            results.push({ ok: false, label: 'جلب الأقسام', detail: `HTTP ${catResult.status} — استجابة غير متوقعة`, hint: 'راجع logs السيرفر' });
-            return results;
-        }
-
-        // ── Step 5: Parse categories ──
+    ipcMain.handle('printers:get', async () => {
         try {
-            const parsed = JSON.parse(catResult.body);
-            const cats = Array.isArray(parsed.categories) ? parsed.categories : [];
-            if (cats.length === 0) {
-                results.push({ ok: false, label: 'الأقسام', detail: 'الاستجابة ناجحة لكن لا توجد أقسام', hint: 'أضف أقسام في لوحة التحكم على السيرفر' });
-            } else {
-                results.push({ ok: true, label: 'الأقسام', detail: `تم جلب ${cats.length} قسم بنجاح ✓` });
-            }
-        } catch (_e) {
-            results.push({ ok: false, label: 'تحليل الاستجابة', detail: 'الاستجابة ليست JSON صحيح', hint: `أول 200 حرف: ${catResult.body.substring(0, 200)}` });
+            return await getInstalledPrinters();
+        } catch (_err) {
+            return [];
+        }
+    });
+
+    ipcMain.handle('posdb:categories', async () => {
+        const synced = sync.getCategories();
+        if (synced.length > 0) {
+            return synced;
+        }
+        try {
+            return await repo.getCategories(getPosSession());
+        } catch (_err) {
+            return [];
+        }
+    });
+
+    ipcMain.handle('posdb:print-config', async () => {
+        const synced = sync.getPrintConfig();
+        if (synced) {
+            return synced;
+        }
+        try {
+            return await repo.getPrintConfig(getPosSession());
+        } catch (_err) {
+            return null;
+        }
+    });
+
+    ipcMain.handle('diagnose:run', async () => {
+        const results = [];
+        const config = await loadConfig();
+        const baseUrl = normalizeMassarUrl(config.serverUrl || '');
+        const agentToken = (config.agentToken || '').trim();
+
+        if (!baseUrl) {
+            results.push({
+                ok: false,
+                label: 'رابط Massar',
+                detail: 'لم يُحدَّد',
+                hint: 'مثال: http://127.0.0.1:8080 (بدون /pos/restaurant)',
+            });
+        } else {
+            results.push({ ok: true, label: 'رابط Massar', detail: baseUrl });
         }
 
-        // ── Step 6: Printers ──
-        const { getInstalledPrinters } = require('./printer-service');
+        results.push({
+            ok: !!agentToken,
+            label: 'Token (Agent)',
+            detail: agentToken ? 'مضبوط ✓' : 'غير مضبوط — انسخ HADI_AGENT_TOKEN من .env',
+            hint: agentToken ? null : 'يجب أن يطابق قيمة HADI_AGENT_TOKEN في Massar',
+        });
+
+        const srv = getServerStatus();
+        results.push({
+            ok: srv.ok && srv.mode === 'local',
+            label: 'خادم Agent (ديناميكي)',
+            detail: srv.detail,
+            hint: srv.mode === 'external'
+                ? 'من Task Manager: أغلق electron.exe القديم ثم npm run kill-port ثم npm start'
+                : (srv.ok ? (srv.url ? `المتصفح يكتشف ${srv.url} تلقائياً` : null) : 'شغّل: npm run kill-port ثم npm start'),
+        });
+
+        if (baseUrl) {
+            const pullResult = await pullFromMassar(baseUrl, agentToken);
+            if (pullResult.ok) {
+                results.push({
+                    ok: true,
+                    label: 'سحب من Massar',
+                    detail: `${pullResult.categories_count} مجموعة`,
+                });
+            } else {
+                results.push({
+                    ok: false,
+                    label: 'سحب من Massar',
+                    detail: pullResult.error || 'فشل',
+                    hint: pullResult.error === 'token_unauthorized'
+                        ? 'Token في Agent لا يطابق HADI_AGENT_TOKEN في .env'
+                        : 'تأكد أن Massar يعمل وأن المسار /pos/api/desktop/agent-sync متاح',
+                });
+            }
+        }
+
+        const categories = sync.getCategories();
+        const withPrinter = categories.filter((c) => c.printer_name);
+        const syncedAt = sync.getSyncedAt();
+
+        if (categories.length === 0) {
+            results.push({
+                ok: false,
+                label: 'POSDB — المجموعات',
+                detail: 'لم تُزامَن بعد من متصفح الكاشير',
+                hint: 'افتح /pos/restaurant في Chrome، أو اضبط Token + رابط Massar ثم أعد التشخيص',
+            });
+        } else {
+            results.push({
+                ok: true,
+                label: 'POSDB — المجموعات',
+                detail: `${categories.length} مجموعة، ${withPrinter.length} مربوطة — آخر مزامنة: ${syncedAt || '—'}`,
+            });
+        }
+
+        try {
+            const printConfig = sync.getPrintConfig() || await repo.getPrintConfig(getPosSession());
+            if (printConfig?.direct_printer_name) {
+                results.push({
+                    ok: true,
+                    label: 'طابعة الكاشير',
+                    detail: printConfig.direct_printer_name,
+                });
+            } else {
+                results.push({
+                    ok: false,
+                    label: 'طابعة الكاشير',
+                    detail: 'غير معيّنة في POSDB',
+                    hint: 'عيّن محطة طابعة افتراضية من إعدادات الطباعة في Massar',
+                });
+            }
+        } catch (e) {
+            results.push({ ok: false, label: 'إعدادات الطباعة', detail: e.message });
+        }
+
         try {
             const printerList = await getInstalledPrinters();
             if (printerList.length === 0) {
-                results.push({ ok: false, label: 'الطابعات', detail: 'لم يتم العثور على طابعات مثبتة', hint: 'تأكد من تثبيت طابعة على الويندوز' });
+                results.push({
+                    ok: false,
+                    label: 'طابعات Windows',
+                    detail: 'لا توجد طابعات مثبتة',
+                });
             } else {
-                results.push({ ok: true, label: 'الطابعات', detail: `${printerList.length} طابعة متاحة: ${printerList.slice(0, 3).join('، ')}${printerList.length > 3 ? '…' : ''}` });
+                results.push({
+                    ok: true,
+                    label: 'طابعات Windows',
+                    detail: `${printerList.length} طابعة: ${printerList.slice(0, 3).join('، ')}`,
+                });
             }
         } catch (e) {
-            results.push({ ok: false, label: 'الطابعات', detail: `خطأ: ${e.message}` });
+            results.push({ ok: false, label: 'طابعات Windows', detail: e.message });
         }
 
         return results;
     });
-}
 
-function httpGet(url, token, http, https) {
-    return new Promise((resolve) => {
-        const transport = url.startsWith('https') ? https : http;
-        const options = { headers: { 'Accept': 'application/json' }, rejectUnauthorized: false, timeout: 10000 };
-        const req = transport.get(url, options, (res) => {
-            let body = '';
-            res.on('data', c => body += c);
-            res.on('end', () => resolve({ reachable: true, status: res.statusCode, body }));
-        });
-        req.on('error', (err) => resolve({ reachable: false, error: err.message, status: 0, body: '' }));
-        req.on('timeout', () => { req.destroy(); resolve({ reachable: false, error: 'timeout — انتهت مهلة الاتصال', status: 0, body: '' }); });
+    ipcMain.handle('posdb:pull', async () => {
+        const config = await loadConfig();
+        return pullFromMassar(normalizeMassarUrl(config.serverUrl || ''), config.agentToken || '');
     });
+
+    ipcMain.handle('agent:status', async () => getServerStatus());
+
+    ipcMain.handle('agent:url', async () => getAgentLocalUrl());
 }
 
-module.exports = { registerIpcHandlers, setConfigPath };
+module.exports = { registerIpcHandlers, setConfigPath, loadConfig, saveConfig };
